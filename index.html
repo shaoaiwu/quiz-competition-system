@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>答题比赛系统</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="app">
+        <!-- 首页选择界面 -->
+        <div id="homeScreen" class="screen">
+            <div class="container">
+                <h1>📚 答题比赛系统</h1>
+                <div class="role-selection">
+                    <button onclick="showAdminLogin()" class="role-btn admin-btn">
+                        🔧 管理员入口
+                    </button>
+                    <button onclick="showPlayerEntry()" class="role-btn player-btn">
+                        🎯 参赛者入口
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 管理员登录 -->
+        <div id="adminLoginScreen" class="screen hidden">
+            <div class="container">
+                <h2>管理员登录</h2>
+                <form onsubmit="adminLogin(event)">
+                    <input type="password" id="adminPassword" placeholder="请输入管理密码" required>
+                    <button type="submit">登录</button>
+                </form>
+                <button onclick="showHome()" class="back-btn">返回首页</button>
+            </div>
+        </div>
+
+        <!-- 管理员界面 -->
+        <div id="adminScreen" class="screen hidden">
+            <div class="container">
+                <div class="admin-header">
+                    <h2>🎮 比赛管理中心</h2>
+                    <div class="admin-stats">
+                        <span>参赛人数: <span id="playerCount">0</span></span>
+                        <span>比赛状态: <span id="gameStatus">未开始</span></span>
+                    </div>
+                </div>
+
+                <div class="admin-tabs">
+                    <button onclick="showTab('questions')" class="tab-btn active">题目管理</button>
+                    <button onclick="showTab('control')" class="tab-btn">比赛控制</button>
+                    <button onclick="showTab('monitor')" class="tab-btn">实时监控</button>
+                </div>
+
+                <!-- 题目管理 -->
+                <div id="questionsTab" class="tab-content">
+                    <div class="question-form">
+                        <h3>添加题目</h3>
+                        <form onsubmit="addQuestion(event)">
+                            <input type="text" id="questionText" placeholder="请输入题目" required>
+                            <div class="options-input">
+                                <input type="text" id="optionA" placeholder="选项A" required>
+                                <input type="text" id="optionB" placeholder="选项B" required>
+                                <input type="text" id="optionC" placeholder="选项C" required>
+                                <input type="text" id="optionD" placeholder="选项D" required>
+                            </div>
+                            <select id="correctAnswer" required>
+                                <option value="">选择正确答案</option>
+                                <option value="A">A</option>
+                                <option value="B">B</option>
+                                <option value="C">C</option>
+                                <option value="D">D</option>
+                            </select>
+                            <input type="number" id="timeLimit" placeholder="答题时间(秒)" min="10" max="300" value="30" required>
+                            <button type="submit">添加题目</button>
+                        </form>
+                    </div>
+
+                    <div class="questions-list">
+                        <h3>题目列表</h3>
+                        <div id="questionsList"></div>
+                    </div>
+                </div>
+
+                <!-- 比赛控制 -->
+                <div id="controlTab" class="tab-content hidden">
+                    <div class="qr-section">
+                        <h3>参赛链接</h3>
+                        <div id="participantLink">
+                            <div class="link-display">
+                                <input type="text" id="linkInput" readonly>
+                                <button onclick="copyLink()" class="copy-btn">复制链接</button>
+                            </div>
+                            <div id="qrcode-fallback" class="qr-fallback">
+                                <p>也可以使用在线二维码生成器将上面的链接转为二维码</p>
+                                <button onclick="generateOnlineQR()" class="qr-btn">在线生成二维码</button>
+                            </div>
+                        </div>
+                        <p>参赛者通过此链接或二维码参加比赛</p>
+                    </div>
+
+                    <div class="game-controls">
+                        <h3>比赛控制</h3>
+                        <button onclick="startGame()" id="startBtn" class="control-btn start-btn">开始比赛</button>
+                        <button onclick="nextQuestion()" id="nextBtn" class="control-btn next-btn hidden">下一题</button>
+                        <button onclick="endGame()" id="endBtn" class="control-btn end-btn hidden">结束比赛</button>
+                        <button onclick="resetGame()" class="control-btn reset-btn">重置比赛</button>
+                    </div>
+                </div>
+
+                <!-- 实时监控 -->
+                <div id="monitorTab" class="tab-content hidden">
+                    <h3>实时答题情况</h3>
+                    <div id="currentQuestionInfo"></div>
+                    <div id="playersStatus"></div>
+                    <div id="realTimeStats"></div>
+                </div>
+
+                <button onclick="logout()" class="logout-btn">退出登录</button>
+            </div>
+        </div>
+
+        <!-- 参赛者昵称输入 -->
+        <div id="playerEntryScreen" class="screen hidden">
+            <div class="container">
+                <h2>🎯 参加比赛</h2>
+                <form onsubmit="joinGame(event)">
+                    <input type="text" id="playerName" placeholder="请输入您的参赛昵称" required maxlength="20">
+                    <button type="submit">加入比赛</button>
+                </form>
+                <button onclick="showHome()" class="back-btn">返回首页</button>
+            </div>
+        </div>
+
+        <!-- 等待界面 -->
+        <div id="waitingScreen" class="screen hidden">
+            <div class="container">
+                <h2>⏳ 等待比赛开始</h2>
+                <div class="waiting-info">
+                    <p>欢迎，<span id="welcomeName"></span>！</p>
+                    <p>当前参赛人数: <span id="waitingPlayerCount">0</span></p>
+                    <div class="loading-spinner"></div>
+                    <p>请耐心等待管理员开始比赛...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 答题界面 -->
+        <div id="gameScreen" class="screen hidden">
+            <div class="container">
+                <div class="game-header">
+                    <div class="question-info">
+                        <span>第 <span id="currentQuestionNum">1</span> / <span id="totalQuestions">0</span> 题</span>
+                        <span class="timer">⏰ <span id="timeLeft">30</span>s</span>
+                    </div>
+                    <div class="player-info">
+                        <span>👤 <span id="gamePlayerName"></span></span>
+                        <span>🏆 得分: <span id="playerScore">0</span></span>
+                    </div>
+                </div>
+
+                <div class="question-container">
+                    <h3 id="questionTitle"></h3>
+                    <div class="options" id="optionsContainer">
+                        <!-- 选项将动态生成 -->
+                    </div>
+                </div>
+
+                <div id="questionResult" class="result-display hidden">
+                    <div class="result-content">
+                        <h3 id="resultTitle"></h3>
+                        <p id="resultStats"></p>
+                        <div id="correctAnswerInfo"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 排行榜界面 -->
+        <div id="rankingScreen" class="screen hidden">
+            <div class="container">
+                <h2>🏆 比赛结束 - 排行榜</h2>
+                <div class="final-stats">
+                    <p>本次比赛共 <span id="finalTotalQuestions">0</span> 题</p>
+                    <p>您的最终得分: <span id="finalScore">0</span></p>
+                    <p>您的正确率: <span id="finalAccuracy">0%</span></p>
+                </div>
+                
+                <div class="ranking-list">
+                    <h3>🥇 排行榜</h3>
+                    <div id="rankingTable"></div>
+                </div>
+
+                <button onclick="showHome()" class="back-btn">返回首页</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
