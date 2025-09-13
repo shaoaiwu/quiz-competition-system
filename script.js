@@ -10,7 +10,161 @@ const gameState = {
     currentQuestionIndex: 0,
     questionTimer: null,
     timeLeft: 0,
-    showingResult: false
+    showingResult: false,
+    roomId: null, // 房间ID，用于多设备同步
+    syncInterval: null, // 同步定时器
+    lastSyncTime: 0
+};
+
+// 全局状态管理
+const gameState = {
+    currentScreen: 'home',
+    isAdmin: false,
+    adminPassword: 'admin123', // 可以修改管理员密码
+    questions: [],
+    players: [],
+    currentPlayer: null,
+    gameStatus: 'waiting', // waiting, playing, finished
+    currentQuestionIndex: 0,
+    questionTimer: null,
+    timeLeft: 0,
+    showingResult: false,
+    roomId: null, // 房间ID
+    syncInterval: null
+};
+
+// 房间数据同步系统
+const RoomSync = {
+    // 生成房间ID
+    generateRoomId() {
+        return 'room_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    },
+    
+    // 获取房间ID
+    getRoomId() {
+        if (!gameState.roomId) {
+            // 从URL参数获取房间ID
+            const urlParams = new URLSearchParams(window.location.search);
+            const roomFromUrl = urlParams.get('room');
+            
+            if (roomFromUrl) {
+                gameState.roomId = roomFromUrl;
+            } else if (gameState.isAdmin) {
+                // 管理员创建新房间
+                gameState.roomId = this.generateRoomId();
+                // 更新URL
+                const newUrl = new URL(window.location);
+                newUrl.searchParams.set('room', gameState.roomId);
+                window.history.replaceState({}, '', newUrl);
+            }
+        }
+        return gameState.roomId;
+    },
+    
+    // 保存房间数据到localStorage
+    saveRoomData() {
+        const roomId = this.getRoomId();
+        if (!roomId) return;
+        
+        const roomData = {
+            roomId: roomId,
+            questions: gameState.questions,
+            players: gameState.players,
+            gameStatus: gameState.gameStatus,
+            currentQuestionIndex: gameState.currentQuestionIndex,
+            timeLeft: gameState.timeLeft,
+            showingResult: gameState.showingResult,
+            lastUpdate: Date.now()
+        };
+        
+        localStorage.setItem(`quiz_room_${roomId}`, JSON.stringify(roomData));
+    },
+    
+    // 从localStorage加载房间数据
+    loadRoomData() {
+        const roomId = this.getRoomId();
+        if (!roomId) return false;
+        
+        const data = localStorage.getItem(`quiz_room_${roomId}`);
+        if (!data) return false;
+        
+        try {
+            const roomData = JSON.parse(data);
+            
+            // 更新游戏状态
+            if (roomData.questions) gameState.questions = roomData.questions;
+            if (roomData.players) gameState.players = roomData.players;
+            if (roomData.gameStatus) gameState.gameStatus = roomData.gameStatus;
+            if (roomData.currentQuestionIndex !== undefined) gameState.currentQuestionIndex = roomData.currentQuestionIndex;
+            if (roomData.timeLeft !== undefined) gameState.timeLeft = roomData.timeLeft;
+            if (roomData.showingResult !== undefined) gameState.showingResult = roomData.showingResult;
+            
+            return true;
+        } catch (e) {
+            console.error('Failed to load room data:', e);
+            return false;
+        }
+    },
+    
+    // 启动数据同步
+    startSync() {
+        if (gameState.syncInterval) {
+            clearInterval(gameState.syncInterval);
+        }
+        
+        gameState.syncInterval = setInterval(() => {
+            if (gameState.isAdmin) {
+                // 管理员定期保存数据
+                this.saveRoomData();
+            } else {
+                // 参赛者定期加载数据
+                const oldGameStatus = gameState.gameStatus;
+                const oldQuestionIndex = gameState.currentQuestionIndex;
+                
+                if (this.loadRoomData()) {
+                    // 检查游戏状态是否变化
+                    if (oldGameStatus !== gameState.gameStatus) {
+                        this.handleGameStatusChange();
+                    }
+                    
+                    if (oldQuestionIndex !== gameState.currentQuestionIndex) {
+                        this.handleQuestionChange();
+                    }
+                    
+                    updateUI();
+                }
+            }
+        }, 2000); // 每2秒同步一次
+    },
+    
+    // 停止数据同步
+    stopSync() {
+        if (gameState.syncInterval) {
+            clearInterval(gameState.syncInterval);
+            gameState.syncInterval = null;
+        }
+    },
+    
+    // 处理游戏状态变化
+    handleGameStatusChange() {
+        if (gameState.currentPlayer) {
+            if (gameState.gameStatus === 'playing') {
+                showGameScreen();
+            } else if (gameState.gameStatus === 'finished') {
+                showRankingScreen();
+            }
+        }
+    },
+    
+    // 处理题目变化
+    handleQuestionChange() {
+        if (gameState.currentPlayer && gameState.gameStatus === 'playing') {
+            const currentQ = gameState.questions[gameState.currentQuestionIndex];
+            if (currentQ) {
+                displayQuestion(currentQ);
+            }
+        }
+    }
 };
 
 // 示例题目数据
@@ -94,9 +248,18 @@ function adminLogin(event) {
     
     if (password === gameState.adminPassword) {
         gameState.isAdmin = true;
+        
+        // 创建或加载房间
+        RoomSync.getRoomId();
+        RoomSync.loadRoomData();
+        
         showScreen('adminScreen');
         generateParticipantLink();
         updateAdminUI();
+        
+        // 开始数据同步
+        RoomSync.startSync();
+        
         showNotification('登录成功！', 'success');
     } else {
         showNotification('密码错误！', 'error');
@@ -106,7 +269,9 @@ function adminLogin(event) {
 }
 
 function logout() {
+    RoomSync.stopSync();
     gameState.isAdmin = false;
+    gameState.roomId = null;
     showHome();
 }
 
@@ -117,6 +282,23 @@ function joinGame(event) {
     
     if (!playerName) {
         showNotification('请输入昵称！', 'error');
+        return;
+    }
+    
+    // 从URL获取房间ID
+    const urlParams = new URLSearchParams(window.location.search);
+    const roomId = urlParams.get('room');
+    
+    if (!roomId) {
+        showNotification('无效的参赛链接，请重新扫描二维码或点击链接！', 'error');
+        return;
+    }
+    
+    gameState.roomId = roomId;
+    
+    // 加载房间数据
+    if (!RoomSync.loadRoomData()) {
+        showNotification('房间不存在或已过期！', 'error');
         return;
     }
     
@@ -139,10 +321,16 @@ function joinGame(event) {
     // 添加到玩家列表
     gameState.players.push(gameState.currentPlayer);
     
+    // 保存数据（参赛者也需要保存，以便管理员同步）
+    RoomSync.saveRoomData();
+    
     // 显示等待界面
     showScreen('waitingScreen');
     document.getElementById('welcomeName').textContent = playerName;
     updatePlayerCount();
+    
+    // 开始数据同步
+    RoomSync.startSync();
     
     showNotification('成功加入比赛！', 'success');
     document.getElementById('playerName').value = '';
@@ -204,6 +392,9 @@ function addQuestion(event) {
     gameState.questions.push(newQuestion);
     updateQuestionsList();
     
+    // 保存房间数据
+    RoomSync.saveRoomData();
+    
     // 清空表单
     document.getElementById('questionText').value = '';
     document.getElementById('optionA').value = '';
@@ -220,6 +411,10 @@ function deleteQuestion(questionId) {
     if (confirm('确定要删除这道题目吗？')) {
         gameState.questions = gameState.questions.filter(q => q.id !== questionId);
         updateQuestionsList();
+        
+        // 保存房间数据
+        RoomSync.saveRoomData();
+        
         showNotification('题目删除成功！', 'success');
     }
 }
@@ -252,8 +447,9 @@ function updateQuestionsList() {
 
 // 生成参赛链接
 function generateParticipantLink() {
+    const roomId = RoomSync.getRoomId();
     const baseUrl = window.location.origin + window.location.pathname;
-    const participantUrl = baseUrl + '#join';
+    const participantUrl = `${baseUrl}?room=${roomId}#join`;
     
     const linkInput = document.getElementById('linkInput');
     if (linkInput) {
@@ -367,10 +563,8 @@ function startGame() {
     updateAdminUI();
     startQuestion();
     
-    // 通知所有参赛者开始比赛
-    if (gameState.currentPlayer) {
-        showGameScreen();
-    }
+    // 保存房间数据，通知所有参赛者
+    RoomSync.saveRoomData();
     
     showNotification('比赛开始！', 'success');
 }
@@ -390,6 +584,9 @@ function startQuestion() {
         player.hasAnswered = false;
         player.currentAnswer = null;
     });
+    
+    // 保存状态，同步到其他设备
+    RoomSync.saveRoomData();
     
     if (gameState.currentPlayer) {
         displayQuestion(currentQ);
@@ -418,6 +615,9 @@ function startTimer() {
 function showQuestionResult() {
     gameState.showingResult = true;
     
+    // 保存状态，同步到其他设备
+    RoomSync.saveRoomData();
+    
     if (gameState.currentPlayer) {
         displayQuestionResult();
     }
@@ -443,11 +643,10 @@ function endGame() {
     gameState.gameStatus = 'finished';
     clearInterval(gameState.questionTimer);
     
-    updateAdminUI();
+    // 保存最终状态
+    RoomSync.saveRoomData();
     
-    if (gameState.currentPlayer) {
-        showRankingScreen();
-    }
+    updateAdminUI();
     
     showNotification('比赛结束！', 'info');
 }
@@ -459,6 +658,9 @@ function resetGame() {
         gameState.players = [];
         gameState.currentPlayer = null;
         clearInterval(gameState.questionTimer);
+        
+        // 保存重置后的状态
+        RoomSync.saveRoomData();
         
         updateAdminUI();
         updatePlayerCount();
@@ -530,6 +732,9 @@ function selectAnswer(option) {
     if (isCorrect) {
         gameState.currentPlayer.score += 10; // 每题10分
     }
+    
+    // 保存玩家答题数据
+    RoomSync.saveRoomData();
     
     updatePlayerScore();
     updateMonitorDisplay();
@@ -743,10 +948,20 @@ function showNotification(message, type = 'info') {
     }, 3000);
 }
 
-// 检查URL哈希，支持扫码进入
+// 检查URL参数和哈希，支持房间链接和扫码进入
 function checkUrlHash() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const roomId = urlParams.get('room');
+    
     if (window.location.hash === '#join') {
-        showPlayerEntry();
+        if (roomId) {
+            // 有房间ID，直接显示参赛者入口
+            showPlayerEntry();
+        } else {
+            // 没有房间ID，提示错误
+            showNotification('无效的参赛链接！', 'error');
+            showHome();
+        }
     }
 }
 
